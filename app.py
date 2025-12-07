@@ -66,7 +66,50 @@ def viewer_page():
     st.write(f"*File Name:* {row['file_name']}")
     st.write(f"*Created At:* {row['created_at']}")
     st.subheader("📌 Current Status:")
-    st.info(row["status"])
+
+    STATUS_STEPS = [
+        "Pending",
+        "Checking Document",
+        "Printing",
+        "Ready for Pickup",
+        "Completed",
+    ]
+
+    current_status = row["status"]
+
+    # Build circle UI
+    current_index = STATUS_STEPS.index(current_status)
+    cols = st.columns(len(STATUS_STEPS))
+
+    for i, step in enumerate(STATUS_STEPS):
+        with cols[i]:
+            if i < current_index:
+                color = "#4CAF50"      # green
+            elif i == current_index:
+                color = "#f7c843"      # yellow
+            else:
+                color = "#d3d3d3"      # gray
+
+            bold = "font-weight: bold;" if i == current_index else ""
+
+            st.markdown(
+                f"""
+                <div style="text-align:center;">
+                    <div style="
+                        width:40px;
+                        height:40px;
+                        border-radius:50%;
+                        background:{color};
+                        border:2px solid black;
+                        margin:auto;">
+                    </div>
+                    <div style="font-size:12px;margin-top:5px;{bold}">
+                        {step}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
 
 # -----------------------------------------------------------
