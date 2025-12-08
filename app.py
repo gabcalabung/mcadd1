@@ -1,4 +1,4 @@
-# app.py -- Google Sheets + ImgBB + Streamlit (with BIG QR + Gradient Blue→Yellow)
+# app.py -- Google Sheets + ImgBB + Streamlit (with BIG QR rows + Blue/Yellow QR)
 import streamlit as st
 import qrcode
 import os
@@ -8,7 +8,7 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
 import json
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw   # <-- needed for colored QR
 
 st.set_page_config(page_title="Print Tracker", layout="wide")
 
@@ -41,7 +41,6 @@ service_account_info = {
     "client_x509_cert_url": get_secret("client_x509_cert_url"),
 }
 
-# quick secrets check
 missing = [k for k, v in {
     "ADMIN_PASSWORD": ADMIN_PASSWORD,
     "PUBLIC_URL": PUBLIC_URL,
@@ -59,32 +58,21 @@ if missing:
 # ---------------------------
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
+credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+gc = gspread.authorize(credentials)
+sh = gc.open_by_key(SHEET_ID)
+
+# Ensure worksheet exists
 try:
-    credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
-    gc = gspread.authorize(credentials)
-    sh = gc.open_by_key(SHEET_ID)
-except Exception as e:
-    st.error("Failed to authenticate with Google Sheets.")
-    st.exception(e)
-    st.stop()
+    ws = sh.worksheet("Jobs")
+except:
+    ws = sh.add_worksheet(title="Jobs", rows="1000", cols="10")
 
-# ensure worksheet exists and header is present
-try:
-    try:
-        ws = sh.worksheet("Jobs")
-    except Exception:
-        ws = sh.add_worksheet(title="Jobs", rows="1000", cols="10")
-
-    values = ws.row_values(1)
-    expected_header = ["job_id", "client_name", "file_name", "status", "created_at", "qr_path"]
-    if not values or values[:6] != expected_header:
-        ws.clear()
-        ws.append_row(expected_header)
-
-except Exception as e:
-    st.error("Failed to prepare worksheet 'Jobs'.")
-    st.exception(e)
-    st.stop()
+header = ["job_id", "client_name", "file_name", "status", "created_at", "qr_path"]
+values = ws.row_values(1)
+if not values or values[:6] != header:
+    ws.clear()
+    ws.append_row(header)
 
 # ---------------------------
 # Utilities
@@ -92,8 +80,19 @@ except Exception as e:
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
 
-# Gradient QR generator (Blue → Yellow)
-def generate_gradient_qr(link, save_path):
+def upload_to_imgbb(image_path):
+    url = "https://api.imgbb.com/1/upload"
+    with open(image_path, "rb") as f:
+        files = {"image": f}
+        data = {"key": IMGBB_API_KEY}
+        resp = requests.post(url, data=data, files=files, timeout=30)
+    resp.raise_for_status()
+    return resp.json()["data"]["url"]
+
+# ------------------------------------------------
+# 🔵🟡 BLUE DOTS + YELLOW BACKGROUND QR GENERATOR
+# ------------------------------------------------
+def generate_colored_qr(link, save_path):
     qr = qrcode.QRCode(
         version=2,
         box_size=12,
@@ -106,54 +105,37 @@ def generate_gradient_qr(link, save_path):
     matrix = qr.get_matrix()
     size = len(matrix)
 
-    blue = (0, 87, 255)
-    yellow = (255, 235, 59)
+    BLUE = (0, 87, 255)
+    YELLOW = (255, 235, 59)
 
     img_size = size * 12
-    img = Image.new("RGB", (img_size, img_size), "white")
+    img = Image.new("RGB", (img_size, img_size), YELLOW)
     draw = ImageDraw.Draw(img)
 
     for y in range(size):
         for x in range(size):
-            if matrix[y][x]:
-                t = ((x + y) / (size * 2))
-                r = int(blue[0] * (1 - t) + yellow[0] * t)
-                g = int(blue[1] * (1 - t) + yellow[1] * t)
-                b = int(blue[2] * (1 - t) + yellow[2] * t)
-                color = (r, g, b)
+            if matrix[y][x]:  # dark module
                 draw.rectangle(
                     [x * 12, y * 12, (x + 1) * 12, (y + 1) * 12],
-                    fill=color
+                    fill=BLUE
                 )
+
     img.save(save_path)
 
-
-def upload_to_imgbb(image_path):
-    url = "https://api.imgbb.com/1/upload"
-    with open(image_path, "rb") as f:
-        files = {"image": f}
-        data = {"key": IMGBB_API_KEY}
-        resp = requests.post(url, data=data, files=files, timeout=30)
-    resp.raise_for_status()
-    j = resp.json()
-    if not j.get("success"):
-        raise RuntimeError("ImgBB upload failed: " + json.dumps(j))
-    return j["data"]["url"]
-
-
+# ------------------------------------------------
+# replace old qr generator
+# ------------------------------------------------
 def generate_qr_and_upload(job_id):
     link = f"{PUBLIC_URL}?job_id={job_id}"
     local_path = os.path.join(QR_DIR, f"{job_id}.png")
 
-    generate_gradient_qr(link, local_path)
+    generate_colored_qr(link, local_path)
+
     public_url = upload_to_imgbb(local_path)
-
     return local_path, public_url
-
 
 def load_jobs_df():
     return pd.DataFrame(ws.get_all_records())
-
 
 def update_status_in_sheet(job_id, new_status):
     records = ws.get_all_records()
@@ -163,8 +145,9 @@ def update_status_in_sheet(job_id, new_status):
             return True
     return False
 
-
-# Resize row height
+# ---------------------------
+# Resize row height for BIG QR
+# ---------------------------
 def resize_row_height(ws, row_number, height=200):
     body = {
         "requests": [
@@ -184,53 +167,65 @@ def resize_row_height(ws, row_number, height=200):
     }
     ws.spreadsheet.batch_update(body)
 
-
 # ---------------------------
 # Viewer Page
 # ---------------------------
 def viewer_page():
     st.title("📄 Print Job Status Viewer")
-    df = load_jobs_df()
 
     qparams = st.experimental_get_query_params()
     job_param = qparams.get("job_id", [None])[0]
+
     job_id_input = st.text_input("Enter Job ID:", value=job_param or "")
-
     if not job_id_input:
-        return st.info("Scan the QR code or enter Job ID.")
+        st.info("Scan your QR code or enter your Job ID.")
+        return
 
+    df = load_jobs_df()
     if job_id_input not in df["job_id"].astype(str).values:
-        return st.error("Job ID not found.")
+        st.error("Job ID not found.")
+        return
 
-    row = df[df["job_id"] == job_id_input].iloc[0]
+    row = df[df["job_id"].astype(str) == str(job_id_input)].iloc[0]
 
-    st.write(f"*Client:* {row['client_name']}")
-    st.write(f"*File:* {row['file_name']}")
-    st.write(f"*Created:* {row['created_at']}")
-    st.write(f"*Status:* {row['status']}")
+    st.write(f"*Job ID:* {row['job_id']}")
+    st.write(f"*Client Name:* {row['client_name']}")
+    st.write(f"*File Name:* {row['file_name']}")
+    st.write(f"*Created At:* {row['created_at']}")
+
+    STATUS = ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
+    current = row["status"]
+    cols = st.columns(len(STATUS))
+    for i, s in enumerate(STATUS):
+        color = "#4CAF50" if i < STATUS.index(current) else "#f7c843" if i == STATUS.index(current) else "#d3d3d3"
+        cols[i].markdown(
+            f"""
+            <div style="text-align:center;">
+                <div style="width:40px;height:40px;border-radius:50%;background:{color};margin:auto;border:1px solid #000"></div>
+                <div style="font-size:12px;margin-top:6px">{s}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     qr_cell = row.get("qr_path", "")
     st.subheader("QR Code")
-
     if qr_cell.startswith("=IMAGE("):
-        try:
-            url = qr_cell.split('"')[1]
-            st.image(url)
-        except:
-            st.write(qr_cell)
-    elif qr_cell.startswith("http"):
-        st.image(qr_cell)
-
+        url = qr_cell.split('"')[1]
+        st.image(url)
+    else:
+        st.info("No QR code available.")
 
 # ---------------------------
 # Admin Page
 # ---------------------------
 def admin_page():
     st.title("🛠 Admin — Print Job Manager")
-    password = st.text_input("Enter admin password:", type="password")
 
+    password = st.text_input("Enter admin password:", type="password")
     if password != ADMIN_PASSWORD:
-        return st.warning("Enter correct admin password.")
+        st.warning("Enter admin password to access the admin panel.")
+        return
 
     st.success("Logged in as Admin")
 
@@ -240,8 +235,7 @@ def admin_page():
 
     if st.button("Create Job"):
         df = load_jobs_df()
-        job_no = len(df) + 1
-        job_id = f"MCADD_{str(job_no).zfill(3)}"
+        job_id = f"MCADD_{str(len(df) + 1).zfill(3)}"
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         local_path, public_url = generate_qr_and_upload(job_id)
@@ -254,28 +248,19 @@ def admin_page():
         resize_row_height(ws, last_row, 200)
 
         st.success(f"Created job {job_id}")
-        st.image(public_url, caption="QR Code")
+        st.image(public_url)
 
-    # Update status
+    st.subheader("🔧 Update status")
     df = load_jobs_df()
+    if not df.empty:
+        chosen = st.selectbox("Select job", df["job_id"])
+        new_status = st.selectbox("New status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
+        if st.button("Update Status"):
+            update_status_in_sheet(chosen, new_status)
+            st.success("Updated!")
 
-    st.subheader("🔧 Update Status")
-    if df.empty:
-        st.info("No jobs yet.")
-        return
-
-    chosen = st.selectbox("Select job:", df["job_id"].tolist())
-    new_status = st.selectbox("New status:", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
-
-    if st.button("Update Status"):
-        if update_status_in_sheet(chosen, new_status):
-            st.success("Status updated.")
-        else:
-            st.error("Update failed.")
-
-    st.subheader("📋 All Jobs (Live)")
-    st.dataframe(df)
-
+    st.subheader("📋 All jobs")
+    st.dataframe(load_jobs_df())
 
 # ---------------------------
 # Navigation
