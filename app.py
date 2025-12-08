@@ -1,3 +1,4 @@
+
 # app.py -- Google Sheets + ImgBB + Streamlit (with BIG QR rows + Blue/Yellow QR)
 import streamlit as st
 import qrcode
@@ -105,9 +106,8 @@ def generate_colored_qr(link, save_path):
     matrix = qr.get_matrix()
     size = len(matrix)
 
-    # --- QR Colors (your choice) ---
-BLUE = (0, 59, 142)       # Dark Blue 1  →  #003B8E
-YELLOW = (255, 235, 59)   # Yellow background
+    BLUE = (0, 87, 255)
+    YELLOW = (255, 235, 59)
 
     img_size = size * 12
     img = Image.new("RGB", (img_size, img_size), YELLOW)
@@ -273,4 +273,3 @@ if page == "Viewer":
     viewer_page()
 else:
     admin_page()
-
