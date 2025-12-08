@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 # -----------------------------------------------------------
 # GOOGLE SHEETS SETUP
 # -----------------------------------------------------------
-SHEET_ID = st.secrets["SHEET_ID"]
+SHEET_ID = st.secrets["1tcUxzc5Uchyq8YBKiWKme1ykWZB8JCIDYBD-9QNDTkg"]
 
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
