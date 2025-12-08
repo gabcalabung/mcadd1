@@ -9,57 +9,74 @@ from google.oauth2.service_account import Credentials
 # -----------------------------------------------------------
 # GOOGLE SHEETS SETUP
 # -----------------------------------------------------------
-SHEET_ID = st.secrets["SHEET_ID"]
-
-scope = [
+SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
 credentials = Credentials.from_service_account_info(
-    st.secrets, scopes=scope
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
 )
 
 gc = gspread.authorize(credentials)
-sh = gc.open_by_key(SHEET_ID)
+sheet = gc.open_by_key(st.secrets["SHEET_ID"]).sheet1   # first worksheet
 
-try:
-    worksheet = sh.worksheet("Jobs")
-except:
-    worksheet = sh.add_worksheet(title="Jobs", rows="1000", cols="10")
-    worksheet.append_row(["job_id", "client_name", "file_name", "status", "created_at", "qr_path"])
 
 # -----------------------------------------------------------
-# HELPER FUNCTIONS (Updated for Google Sheets)
+# LOAD / SAVE FUNCTIONS (GOOGLE SHEETS)
 # -----------------------------------------------------------
 def load_jobs():
-    df = pd.DataFrame(worksheet.get_all_records())
-    return df
+    data = sheet.get_all_records()
+    return pd.DataFrame(data)
 
-def save_jobs(df):
-    worksheet.clear()
-    worksheet.append_row(df.columns.tolist())
-    rows = df.values.tolist()
-    worksheet.append_rows(rows)
+
+def save_row(row_dict):
+    """Append a new job to Sheets."""
+    sheet.append_row(list(row_dict.values()))
+
+
+def update_status(job_id, new_status):
+    """Update the status column of the selected Job ID."""
+    values = sheet.get_all_records()
+
+    for i, row in enumerate(values, start=2):  # header = row 1
+        if row["job_id"] == job_id:
+            sheet.update_cell(i, 4, new_status)  # column 4 = status
+            return True
+
+    return False
+
+
+# -----------------------------------------------------------
+# QR CODE GENERATION
+# -----------------------------------------------------------
+QR_DIR = "qrcodes"
+
+if not os.path.exists(QR_DIR):
+    os.makedirs(QR_DIR)
+
 
 def generate_qr(job_id):
     link = f"{st.secrets['PUBLIC_URL']}?job_id={job_id}"
-    qr_path = f"{job_id}.png"
+    qr_path = f"{QR_DIR}/{job_id}.png"
+
     img = qrcode.make(link)
     img.save(qr_path)
+
     return qr_path, link
 
+
 # -----------------------------------------------------------
-# PAGE: VIEWER
+# VIEWER PAGE
 # -----------------------------------------------------------
 def viewer_page():
     st.title("📄 Print Job Status Viewer")
 
-    query_params = st.query_params
-    job_id = query_params.get("job_id", None)
+    job_id = st.query_params.get("job_id", None)
 
     if job_id is None:
-        st.warning("No job ID provided. Scan your QR code or click your tracking link.")
+        st.warning("No job ID provided. Scan your QR code.")
         return
 
     df = load_jobs()
@@ -71,10 +88,9 @@ def viewer_page():
     row = df[df["job_id"] == job_id].iloc[0]
 
     st.success(f"Job Found: *{job_id}*")
-    st.write(f"*Client Name:* {row['client_name']}")
-    st.write(f"*File Name:* {row['file_name']}")
-    st.write(f"*Created At:* {row['created_at']}")
-
+    st.write(f"**Client Name:** {row['client_name']}")
+    st.write(f"**File Name:** {row['file_name']}")
+    st.write(f"**Created At:** {row['created_at']}")
     st.subheader("📌 Current Status:")
 
     STATUS_STEPS = [
@@ -87,19 +103,18 @@ def viewer_page():
 
     current_status = row["status"]
     current_index = STATUS_STEPS.index(current_status)
-
     cols = st.columns(len(STATUS_STEPS))
 
     for i, step in enumerate(STATUS_STEPS):
         with cols[i]:
             if i < current_index:
-                color = "#4CAF50"  # green
+                color = "#4CAF50"
             elif i == current_index:
-                color = "#f7c843"  # yellow
+                color = "#f7c843"
             else:
-                color = "#d3d3d3"  # gray
+                color = "#d3d3d3"
 
-            bold = "font-weight: bold;" if i == current_index else ""
+            bold = "font-weight:bold;" if i == current_index else ""
 
             st.markdown(
                 f"""
@@ -120,14 +135,14 @@ def viewer_page():
                 unsafe_allow_html=True
             )
 
+
 # -----------------------------------------------------------
-# PAGE: ADMIN
+# ADMIN PAGE
 # -----------------------------------------------------------
 def admin_page():
     st.title("🛠 Admin Panel — Print Job Manager")
 
     password = st.text_input("Enter admin password:", type="password")
-
     if password != st.secrets["ADMIN_PASSWORD"]:
         st.stop()
 
@@ -135,13 +150,15 @@ def admin_page():
 
     df = load_jobs()
 
+    # --- Add New Job ---
     st.subheader("➕ Add New Job")
     client = st.text_input("Client Name")
     file_name = st.text_input("File / Document Name")
     add_btn = st.button("Create Job")
 
     if add_btn and client and file_name:
-        job_id = f"MCADD_{str(len(df) + 1).zfill(3)}"
+        job_number = len(df) + 1
+        job_id = f"MCADD_{str(job_number).zfill(3)}"
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         qr_path, link = generate_qr(job_id)
 
@@ -154,31 +171,38 @@ def admin_page():
             "qr_path": qr_path
         }
 
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        save_jobs(df)
+        save_row(new_row)
 
-        st.success(f"Job created successfully! Job ID: *{job_id}*")
-        st.image(qr_path, caption="Scan to track")
-        st.write("Tracking Link:")
+        st.success(f"Job Created! ID: {job_id}")
+        st.image(qr_path, caption="Scan to Track")
         st.code(link)
 
+    # --- Update Job Status ---
     st.subheader("🔧 Update Job Status")
+
     df = load_jobs()
     job_list = df["job_id"].tolist()
+
     update_id = st.selectbox("Select Job ID", job_list)
-    new_status = st.selectbox("New Status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
+    new_status = st.selectbox("New Status", [
+        "Pending", "Checking Document", "Printing",
+        "Ready for Pickup", "Completed"
+    ])
     update_btn = st.button("Update Status")
 
     if update_btn:
-        df.loc[df["job_id"] == update_id, "status"] = new_status
-        save_jobs(df)
-        st.success(f"{update_id} updated to: {new_status}")
+        if update_status(update_id, new_status):
+            st.success(f"{update_id} updated to {new_status}")
+        else:
+            st.error("Failed to update status.")
 
+    # --- Job Table ---
     st.subheader("📋 All Jobs")
-    st.dataframe(df)
+    st.dataframe(load_jobs())
+
 
 # -----------------------------------------------------------
-# MAIN NAVIGATION
+# NAVIGATION
 # -----------------------------------------------------------
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Viewer", "Admin"])
