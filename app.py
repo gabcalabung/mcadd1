@@ -105,8 +105,9 @@ def generate_colored_qr(link, save_path):
     matrix = qr.get_matrix()
     size = len(matrix)
 
-    BLUE = (0, 87, 255)
-    YELLOW = (255, 235, 59)
+    # --- QR Colors (your choice) ---
+BLUE = (0, 59, 142)       # Dark Blue 1  →  #003B8E
+YELLOW = (255, 235, 59)   # Yellow background
 
     img_size = size * 12
     img = Image.new("RGB", (img_size, img_size), YELLOW)
