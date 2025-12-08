@@ -3,13 +3,11 @@ import streamlit as st
 import qrcode
 import os
 import requests
-import tempfile
 import pandas as pd
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
 import json
-import time
 
 st.set_page_config(page_title="Print Tracker", layout="wide")
 
@@ -28,7 +26,7 @@ PUBLIC_URL = get_secret("PUBLIC_URL")
 SHEET_ID = get_secret("SHEET_ID")
 IMGBB_API_KEY = get_secret("IMGBB_API_KEY")
 
-# service account assembled from top-level secrets (your current secrets file layout)
+# service account assembled from top-level secrets
 service_account_info = {
     "type": get_secret("type"),
     "project_id": get_secret("project_id"),
@@ -42,7 +40,7 @@ service_account_info = {
     "client_x509_cert_url": get_secret("client_x509_cert_url"),
 }
 
-# quick secrets check - show a friendly message if missing
+# quick secrets check
 missing = [k for k, v in {
     "ADMIN_PASSWORD": ADMIN_PASSWORD,
     "PUBLIC_URL": PUBLIC_URL,
@@ -50,9 +48,9 @@ missing = [k for k, v in {
     "IMGBB_API_KEY": IMGBB_API_KEY,
     "service_account_info.type": service_account_info.get("type"),
 }.items() if not v]
+
 if missing:
     st.error("Missing secrets: " + ", ".join(missing))
-    st.info("Open Streamlit → Your app → Settings → Secrets and paste the required keys (exact names).")
     st.stop()
 
 # ---------------------------
@@ -75,13 +73,13 @@ try:
         ws = sh.worksheet("Jobs")
     except Exception:
         ws = sh.add_worksheet(title="Jobs", rows="1000", cols="10")
-    # read header
+
     values = ws.row_values(1)
     expected_header = ["job_id", "client_name", "file_name", "status", "created_at", "qr_path"]
     if not values or values[:6] != expected_header:
-        # clear and set header
         ws.clear()
         ws.append_row(expected_header)
+
 except Exception as e:
     st.error("Failed to prepare worksheet 'Jobs'.")
     st.exception(e)
@@ -95,8 +93,6 @@ os.makedirs(QR_DIR, exist_ok=True)
 
 def upload_to_imgbb(image_path):
     """Uploads local image to ImgBB; returns direct image URL"""
-    if not IMGBB_API_KEY:
-        raise RuntimeError("IMGBB_API_KEY missing from secrets.")
     url = "https://api.imgbb.com/1/upload"
     with open(image_path, "rb") as f:
         files = {"image": f}
@@ -109,12 +105,12 @@ def upload_to_imgbb(image_path):
     return j["data"]["url"]
 
 def generate_qr_and_upload(job_id):
-    """Generate QR, upload to imgbb, return public url and local path."""
     link = f"{PUBLIC_URL}?job_id={job_id}"
     local_path = os.path.join(QR_DIR, f"{job_id}.png")
+
     img = qrcode.make(link)
     img.save(local_path)
-    # upload
+
     public_url = upload_to_imgbb(local_path)
     return local_path, public_url
 
@@ -122,27 +118,24 @@ def load_jobs_df():
     records = ws.get_all_records()
     return pd.DataFrame(records)
 
-def append_job_to_sheet(row_values):
-    """row_values: list in same order as header"""
-    ws.append_row(row_values)
-
 def update_status_in_sheet(job_id, new_status):
     records = ws.get_all_records()
-    for i, r in enumerate(records, start=2):  # header is row 1
+    for i, r in enumerate(records, start=2):
         if str(r.get("job_id")) == str(job_id):
-            ws.update_cell(i, 4, new_status)  # status column index 4
+            ws.update_cell(i, 4, new_status)
             return True
     return False
 
 # ---------------------------
-# Pages
+# Viewer Page
 # ---------------------------
 def viewer_page():
     st.title("📄 Print Job Status Viewer")
-    # support job_id via query param and manual input
+
     qparams = st.experimental_get_query_params()
     job_param = qparams.get("job_id", [None])[0]
-    job_id_input = st.text_input("Enter Job ID (or scan QR to open link):", value=job_param or "")
+
+    job_id_input = st.text_input("Enter Job ID:", value=job_param or "")
     if not job_id_input:
         st.info("Scan the QR code or enter your Job ID.")
         return
@@ -157,59 +150,64 @@ def viewer_page():
         return
 
     row = df[df["job_id"].astype(str) == str(job_id_input)].iloc[0]
-    st.markdown(f"Job ID: {row['job_id']}")
-    st.markdown(f"Client Name: {row.get('client_name','')}")
-    st.markdown(f"File Name: {row.get('file_name','')}")
-    st.markdown(f"Created At: {row.get('created_at','')}")
-    st.subheader("Current status")
+
+    st.write(f"*Job ID:* {row['job_id']}")
+    st.write(f"*Client Name:* {row.get('client_name','')}")
+    st.write(f"*File Name:* {row.get('file_name','')}")
+    st.write(f"*Created At:* {row.get('created_at','')}")
+
     STATUS_STEPS = ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
     current_status = row.get("status", "Pending")
-    try:
-        idx = STATUS_STEPS.index(current_status)
-    except ValueError:
-        idx = 0
+
+    st.subheader("Current Status")
     cols = st.columns(len(STATUS_STEPS))
-    for i, s in enumerate(STATUS_STEPS):
-        with cols[i]:
-            if i < idx:
-                color = "#4CAF50"
-            elif i == idx:
-                color = "#f7c843"
-            else:
-                color = "#d3d3d3"
-            st.markdown(f"""
-                <div style="text-align:center;">
-                  <div style="width:40px;height:40px;border-radius:50%;background:{color};margin:auto;border:1px solid #333"></div>
-                  <div style="font-size:12px;margin-top:6px">{s}</div>
-                </div>""", unsafe_allow_html=True)
-    # show QR if sheet stored formula (=IMAGE...) or plain url
+    for i, step in enumerate(STATUS_STEPS):
+        color = (
+            "#4CAF50" if i < STATUS_STEPS.index(current_status)
+            else "#f7c843" if i == STATUS_STEPS.index(current_status)
+            else "#d3d3d3"
+        )
+        cols[i].markdown(
+            f"""
+            <div style="text-align:center;">
+                <div style="width:40px;height:40px;border-radius:50%;background:{color};margin:auto;border:1px solid #333"></div>
+                <div style="font-size:12px;margin-top:6px">{step}</div>
+            </div>
+            """, unsafe_allow_html=True
+        )
+
     qr_cell = row.get("qr_path", "")
+
+    st.subheader("QR Code")
     if isinstance(qr_cell, str) and qr_cell.startswith("=IMAGE("):
-        st.markdown("QR code (from sheet):")
-        # extract URL inside formula
         try:
             url = qr_cell.split('"')[1]
             st.image(url)
-        except Exception:
+        except:
             st.write(qr_cell)
     elif isinstance(qr_cell, str) and qr_cell.startswith("http"):
         st.image(qr_cell)
     else:
-        st.write("No QR available for this job.")
+        st.info("No QR code available.")
 
+# ---------------------------
+# Admin Page
+# ---------------------------
 def admin_page():
     st.title("🛠 Admin — Print Job Manager")
+
     password = st.text_input("Enter admin password:", type="password")
     if password != ADMIN_PASSWORD:
         st.warning("Enter admin password to access the admin panel.")
         return
 
     st.success("Logged in as Admin")
+
     st.subheader("➕ Create new job")
     client = st.text_input("Client Name")
     file_name = st.text_input("File / Document Name")
-    create = st.button("Create Job")
-    if create:
+
+    if st.button("Create Job"):
         if not client or not file_name:
             st.error("Please provide client name and file name.")
         else:
@@ -217,38 +215,49 @@ def admin_page():
             job_no = len(df) + 1
             job_id = f"MCADD_{str(job_no).zfill(3)}"
             created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             try:
                 local_path, public_url = generate_qr_and_upload(job_id)
-                # insert IMAGE formula so sheet displays the picture
                 qr_formula = f'=IMAGE("{public_url}")'
-                row = [job_id, client, file_name, "Pending", created_at, qr_formula]
-                append_job_to_sheet(row)
+
+                # Step 1: write row WITHOUT formula
+                ws.append_row([job_id, client, file_name, "Pending", created_at, ""])
+
+                # Step 2: find last row
+                last_row = len(ws.get_all_values())
+
+                # Step 3: insert IMAGE formula properly
+                ws.update(
+                    f"F{last_row}:F{last_row}",
+                    [[qr_formula]],
+                    value_input_option="USER_ENTERED"
+                )
+
                 st.success(f"Created job {job_id}")
-                st.image(public_url, caption="QR (uploaded)")
+                st.image(public_url, caption="QR Code")
+
             except Exception as e:
-                st.error("Failed to generate/upload QR: " + str(e))
+                st.error("Failed to generate/upload QR.")
+                st.exception(e)
 
     st.subheader("🔧 Update status")
     df = load_jobs_df()
+
     if df.empty:
         st.info("No jobs to update.")
     else:
         job_list = df["job_id"].astype(str).tolist()
         chosen = st.selectbox("Select job", job_list)
         new_status = st.selectbox("New status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
+
         if st.button("Update Status"):
-            ok = update_status_in_sheet(chosen, new_status)
-            if ok:
+            if update_status_in_sheet(chosen, new_status):
                 st.success("Status updated.")
             else:
-                st.error("Failed to update — make sure the job exists.")
+                st.error("Failed to update.")
 
     st.subheader("📋 All jobs (live from sheet)")
-    try:
-        st.dataframe(load_jobs_df())
-    except Exception as e:
-        st.error("Failed to load jobs:")
-        st.exception(e)
+    st.dataframe(load_jobs_df())
 
 # ---------------------------
 # Navigation
