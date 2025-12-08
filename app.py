@@ -1,4 +1,3 @@
-
 # app.py -- Google Sheets + ImgBB + Streamlit (with BIG QR rows + Blue/Yellow QR)
 import streamlit as st
 import qrcode
@@ -106,8 +105,9 @@ def generate_colored_qr(link, save_path):
     matrix = qr.get_matrix()
     size = len(matrix)
 
-    BLUE = (0, 87, 255)
-    YELLOW = (255, 235, 59)
+    # --- Updated Colors (Dark Blue + Yellow) ---
+    BLUE = (0, 59, 142)       # Dark Blue (#003B8E)
+    YELLOW = (255, 235, 59)   # Yellow (#FFEB3B)
 
     img_size = size * 12
     img = Image.new("RGB", (img_size, img_size), YELLOW)
@@ -189,10 +189,10 @@ def viewer_page():
 
     row = df[df["job_id"].astype(str) == str(job_id_input)].iloc[0]
 
-    st.write(f"*Job ID:* {row['job_id']}")
-    st.write(f"*Client Name:* {row['client_name']}")
-    st.write(f"*File Name:* {row['file_name']}")
-    st.write(f"*Created At:* {row['created_at']}")
+    st.write(f"Job ID: {row['job_id']}")
+    st.write(f"Client Name: {row['client_name']}")
+    st.write(f"File Name: {row['file_name']}")
+    st.write(f"Created At: {row['created_at']}")
 
     STATUS = ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
     current = row["status"]
@@ -246,6 +246,7 @@ def admin_page():
         last_row = len(ws.get_all_values())
 
         ws.update(f"F{last_row}:F{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
+        
         resize_row_height(ws, last_row, 200)
 
         st.success(f"Created job {job_id}")
