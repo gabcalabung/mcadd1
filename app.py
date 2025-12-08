@@ -1,229 +1,126 @@
 import streamlit as st
-import pandas as pd
 import qrcode
 import os
-import base64
 import requests
-from datetime import datetime
-import gspread
 from google.oauth2.service_account import Credentials
+import gspread
 
-# -----------------------------------------------------------
-# GOOGLE SHEETS SETUP
-# -----------------------------------------------------------
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+# ---------------------------
+# LOAD SECRETS
+# ---------------------------
 
-credentials = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPES
-)
+ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
+PUBLIC_URL = st.secrets["PUBLIC_URL"]
+SHEET_ID = st.secrets["SHEET_ID"]
+IMGBB_API_KEY = st.secrets["IMGBB_API_KEY"]
 
+# Build the service account dictionary from INDIVIDUAL secret keys
+service_account_info = {
+    "type": st.secrets["type"],
+    "project_id": st.secrets["project_id"],
+    "private_key_id": st.secrets["private_key_id"],
+    "private_key": st.secrets["private_key"],
+    "client_email": st.secrets["client_email"],
+    "client_id": st.secrets["client_id"],
+    "auth_uri": st.secrets["auth_uri"],
+    "token_uri": st.secrets["token_uri"],
+    "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
+    "client_x509_cert_url": st.secrets["client_x509_cert_url"],
+}
+
+# Authenticate Google Sheets
+credentials = Credentials.from_service_account_info(service_account_info)
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_key(st.secrets["SHEET_ID"]).sheet1
+sheet = gc.open_by_key(SHEET_ID).sheet1
 
 
-# -----------------------------------------------------------
-# LOAD / SAVE FUNCTIONS (GOOGLE SHEETS)
-# -----------------------------------------------------------
-def load_jobs():
-    data = sheet.get_all_records()
-    return pd.DataFrame(data)
-
-
-def save_row(row_dict):
-    sheet.append_row(list(row_dict.values()))
-
-
-def update_status(job_id, new_status):
-    rows = sheet.get_all_records()
-
-    for i, row in enumerate(rows, start=2):  # row 1 = header
-        if row["job_id"] == job_id:
-            sheet.update_cell(i, 4, new_status)  # column 4 is 'status'
-            return True
-
-    return False
-
-
-# -----------------------------------------------------------
-# QR CODE GENERATION + UPLOAD
-# -----------------------------------------------------------
-QR_DIR = "qrcodes"
-
-if not os.path.exists(QR_DIR):
-    os.makedirs(QR_DIR)
-
-
-def generate_qr(job_id):
-    link = f"{st.secrets['PUBLIC_URL']}?job_id={job_id}"
-    qr_path = f"{QR_DIR}/{job_id}.png"
-
-    # Generate QR image
-    img = qrcode.make(link)
-    img.save(qr_path)
-
-    # Upload QR to ImgBB
-    with open(qr_path, "rb") as f:
-        encoded = base64.b64encode(f.read())
-
-    imgbb_url = "https://api.imgbb.com/1/upload"
-    payload = {
-        "key": st.secrets["IMGBB_API_KEY"],
-        "image": encoded
-    }
-
-    response = requests.post(imgbb_url, payload).json()
-    public_qr_url = response["data"]["url"]
-
-    return qr_path, link, public_qr_url
-
-
-# -----------------------------------------------------------
-# VIEWER PAGE
-# -----------------------------------------------------------
-def viewer_page():
-    st.title("📄 Print Job Status Viewer")
-
-    job_id = st.query_params.get("job_id", None)
-
-    if job_id is None:
-        st.warning("No job ID provided. Scan your QR code.")
-        return
-
-    df = load_jobs()
-
-    if job_id not in df["job_id"].values:
-        st.error("❌ Job ID not found.")
-        return
-
-    row = df[df["job_id"] == job_id].iloc[0]
-
-    st.success(f"Job Found: *{job_id}*")
-    st.write(f"**Client Name:** {row['client_name']}")
-    st.write(f"**File Name:** {row['file_name']}")
-    st.write(f"**Created At:** {row['created_at']}")
-    st.subheader("📌 Current Status:")
-
-    STATUS_STEPS = [
-        "Pending",
-        "Checking Document",
-        "Printing",
-        "Ready for Pickup",
-        "Completed",
-    ]
-
-    current_status = row["status"]
-    current_index = STATUS_STEPS.index(current_status)
-    cols = st.columns(len(STATUS_STEPS))
-
-    for i, step in enumerate(STATUS_STEPS):
-        with cols[i]:
-            if i < current_index:
-                color = "#4CAF50"
-            elif i == current_index:
-                color = "#f7c843"
-            else:
-                color = "#d3d3d3"
-
-            bold = "font-weight:bold;" if i == current_index else ""
-
-            st.markdown(
-                f"""
-                <div style="text-align:center;">
-                    <div style="
-                        width:40px;
-                        height:40px;
-                        border-radius:50%;
-                        background:{color};
-                        border:2px solid black;
-                        margin:auto;">
-                    </div>
-                    <div style="font-size:12px;margin-top:5px;{bold}">
-                        {step}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-
-# -----------------------------------------------------------
-# ADMIN PAGE
-# -----------------------------------------------------------
-def admin_page():
-    st.title("🛠 Admin Panel — Print Job Manager")
-
-    password = st.text_input("Enter admin password:", type="password")
-    if password != st.secrets["ADMIN_PASSWORD"]:
-        st.stop()
-
-    st.success("Logged in as Admin")
-
-    df = load_jobs()
-
-    # Add new job
-    st.subheader("➕ Add New Job")
-    client = st.text_input("Client Name")
-    file_name = st.text_input("File / Document Name")
-    add_btn = st.button("Create Job")
-
-    if add_btn and client and file_name:
-        job_number = len(df) + 1
-        job_id = f"MCADD_{str(job_number).zfill(3)}"
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        qr_path, link, qr_public_url = generate_qr(job_id)
-
-        # Insert QR into Google Sheets using =IMAGE()
-        qr_cell_formula = f'=IMAGE("{qr_public_url}")'
-
-        new_row = {
-            "job_id": job_id,
-            "client_name": client,
-            "file_name": file_name,
-            "status": "Pending",
-            "created_at": created_at,
-            "qr_path": qr_cell_formula
+# ---------------------------
+# QR UPLOAD TO IMGBB
+# ---------------------------
+def upload_to_imgbb(image_path):
+    with open(image_path, "rb") as file:
+        url = "https://api.imgbb.com/1/upload"
+        payload = {
+            "key": IMGBB_API_KEY,
         }
+        response = requests.post(url, payload, files={"image": file})
 
-        save_row(new_row)
-
-        st.success(f"Job Created! ID: {job_id}")
-        st.image(qr_path, caption="Scan to Track")
-        st.code(link)
-
-    # Update job status
-    st.subheader("🔧 Update Job Status")
-    df = load_jobs()
-    job_list = df["job_id"].tolist()
-
-    update_id = st.selectbox("Select Job ID", job_list)
-    new_status = st.selectbox(
-        "New Status",
-        ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
-    )
-    update_btn = st.button("Update Status")
-
-    if update_btn:
-        if update_status(update_id, new_status):
-            st.success(f"{update_id} updated to {new_status}")
-        else:
-            st.error("Failed to update status.")
-
-    st.subheader("📋 All Jobs")
-    st.dataframe(load_jobs())
+    data = response.json()
+    return data["data"]["url"]  # Direct link to image
 
 
-# -----------------------------------------------------------
-# NAVIGATION
-# -----------------------------------------------------------
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Viewer", "Admin"])
+# ---------------------------
+# QR GENERATOR
+# ---------------------------
+def generate_qr(job_id):
+    filename = f"qr_{job_id}.png"
+    img = qrcode.make(f"{PUBLIC_URL}?job={job_id}")
 
-if page == "Viewer":
-    viewer_page()
+    img.save(filename)
+    image_url = upload_to_imgbb(filename)
+    os.remove(filename)  # keep storage empty
+
+    return image_url
+
+
+# ---------------------------
+# ADMIN PAGE
+# ---------------------------
+def admin_page():
+    st.title("Admin - Create Print Job")
+
+    file_name = st.text_input("File / Document Name")
+    if st.button("Create Job"):
+        if not file_name:
+            st.error("Please enter a document name.")
+            return
+
+        # Generate job ID
+        import uuid
+        job_id = str(uuid.uuid4())[:8]
+
+        # Generate QR & upload to ImgBB
+        qr_link = generate_qr(job_id)
+
+        # Save to Google Sheets
+        sheet.append_row([job_id, file_name, "Pending", qr_link])
+
+        st.success("Job Created Successfully!")
+        st.image(qr_link, caption="Generated QR Code")
+        st.write("Share this QR with the customer:")
+        st.write(qr_link)
+
+
+# ---------------------------
+# VIEWER PAGE
+# ---------------------------
+def viewer_page():
+    st.title("Print Job Status Checker")
+
+    job_id = st.text_input("Enter Job ID:")
+    if st.button("Check Status"):
+        data = sheet.get_all_records()
+
+        for row in data:
+            if row["job_id"] == job_id:
+                st.success(f"Document: {row['file_name']}")
+                st.write(f"Status: {row['status']}")
+                st.image(row["qr_link"])
+                return
+
+        st.error("Job not found!")
+
+
+# ---------------------------
+# ROUTER
+# ---------------------------
+mode = st.sidebar.selectbox("Select Mode", ["Viewer", "Admin"])
+
+if mode == "Admin":
+    password = st.sidebar.text_input("Enter admin password:", type="password")
+    if password == ADMIN_PASSWORD:
+        admin_page()
+    else:
+        st.error("Incorrect password.")
 else:
-    admin_page()
+    viewer_page()
