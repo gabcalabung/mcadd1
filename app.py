@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import qrcode
 import os
+import base64
+import requests
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
@@ -20,7 +22,7 @@ credentials = Credentials.from_service_account_info(
 )
 
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_key(st.secrets["SHEET_ID"]).sheet1   # first worksheet
+sheet = gc.open_by_key(st.secrets["SHEET_ID"]).sheet1
 
 
 # -----------------------------------------------------------
@@ -32,24 +34,22 @@ def load_jobs():
 
 
 def save_row(row_dict):
-    """Append a new job to Sheets."""
     sheet.append_row(list(row_dict.values()))
 
 
 def update_status(job_id, new_status):
-    """Update the status column of the selected Job ID."""
-    values = sheet.get_all_records()
+    rows = sheet.get_all_records()
 
-    for i, row in enumerate(values, start=2):  # header = row 1
+    for i, row in enumerate(rows, start=2):  # row 1 = header
         if row["job_id"] == job_id:
-            sheet.update_cell(i, 4, new_status)  # column 4 = status
+            sheet.update_cell(i, 4, new_status)  # column 4 is 'status'
             return True
 
     return False
 
 
 # -----------------------------------------------------------
-# QR CODE GENERATION
+# QR CODE GENERATION + UPLOAD
 # -----------------------------------------------------------
 QR_DIR = "qrcodes"
 
@@ -61,10 +61,24 @@ def generate_qr(job_id):
     link = f"{st.secrets['PUBLIC_URL']}?job_id={job_id}"
     qr_path = f"{QR_DIR}/{job_id}.png"
 
+    # Generate QR image
     img = qrcode.make(link)
     img.save(qr_path)
 
-    return qr_path, link
+    # Upload QR to ImgBB
+    with open(qr_path, "rb") as f:
+        encoded = base64.b64encode(f.read())
+
+    imgbb_url = "https://api.imgbb.com/1/upload"
+    payload = {
+        "key": st.secrets["IMGBB_API_KEY"],
+        "image": encoded
+    }
+
+    response = requests.post(imgbb_url, payload).json()
+    public_qr_url = response["data"]["url"]
+
+    return qr_path, link, public_qr_url
 
 
 # -----------------------------------------------------------
@@ -150,7 +164,7 @@ def admin_page():
 
     df = load_jobs()
 
-    # --- Add New Job ---
+    # Add new job
     st.subheader("➕ Add New Job")
     client = st.text_input("Client Name")
     file_name = st.text_input("File / Document Name")
@@ -160,7 +174,11 @@ def admin_page():
         job_number = len(df) + 1
         job_id = f"MCADD_{str(job_number).zfill(3)}"
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        qr_path, link = generate_qr(job_id)
+
+        qr_path, link, qr_public_url = generate_qr(job_id)
+
+        # Insert QR into Google Sheets using =IMAGE()
+        qr_cell_formula = f'=IMAGE("{qr_public_url}")'
 
         new_row = {
             "job_id": job_id,
@@ -168,7 +186,7 @@ def admin_page():
             "file_name": file_name,
             "status": "Pending",
             "created_at": created_at,
-            "qr_path": qr_path
+            "qr_path": qr_cell_formula
         }
 
         save_row(new_row)
@@ -177,17 +195,16 @@ def admin_page():
         st.image(qr_path, caption="Scan to Track")
         st.code(link)
 
-    # --- Update Job Status ---
+    # Update job status
     st.subheader("🔧 Update Job Status")
-
     df = load_jobs()
     job_list = df["job_id"].tolist()
 
     update_id = st.selectbox("Select Job ID", job_list)
-    new_status = st.selectbox("New Status", [
-        "Pending", "Checking Document", "Printing",
-        "Ready for Pickup", "Completed"
-    ])
+    new_status = st.selectbox(
+        "New Status",
+        ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
+    )
     update_btn = st.button("Update Status")
 
     if update_btn:
@@ -196,7 +213,6 @@ def admin_page():
         else:
             st.error("Failed to update status.")
 
-    # --- Job Table ---
     st.subheader("📋 All Jobs")
     st.dataframe(load_jobs())
 
