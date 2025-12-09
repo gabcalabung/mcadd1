@@ -382,21 +382,24 @@ def viewer_page():
 def admin_page():
     st.title("🛠 Admin Panel — Restricted Access")
 
-    # login wall
+    # ---------------------------
+    # LOGIN WALL
+    # ---------------------------
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
         password = st.text_input("Enter admin password:", type="password")
+
         if st.button("Login"):
-    if password == ADMIN_PASSWORD:
-        st.session_state.logged_in = True
-        st.success("Login successful!")
-        st.rerun()   
+            if password == ADMIN_PASSWORD:
+                st.session_state.logged_in = True
+                st.success("Login successful!")
+                st.rerun()
             else:
                 st.error("Incorrect password.")
-        st.stop()
 
+        st.stop()
     # role selection
     role = st.selectbox("Choose role:", ["Front Desk (create jobs)", "CAD Operator (update status)"])
     df = load_jobs_df()
