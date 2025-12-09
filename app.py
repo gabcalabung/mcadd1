@@ -338,24 +338,24 @@ def admin_page():
     st.title("🛠 Admin Panel — Restricted Access")
 
     # ---------------------------
-    # LOGIN WALL
+    # SINGLE ADMIN LOGIN (MCCB)
     # ---------------------------
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
+    if "admin_logged_in" not in st.session_state:
+        st.session_state.admin_logged_in = False
 
-    if not st.session_state.logged_in:
+    if not st.session_state.admin_logged_in:
         password = st.text_input("Enter admin password:", type="password")
         if st.button("Login"):
             if password == ADMIN_PASSWORD:
-                st.session_state.logged_in = True
+                st.session_state.admin_logged_in = True
                 st.success("Login successful!")
-                st.rerun()   # 🔥 FIXED: this replaced st.experimental_rerun()
+                st.rerun()
             else:
-                st.error("Incorrect password.")
+                st.error("Incorrect admin password.")
         st.stop()
 
     # ---------------------------
-    # ROLE SELECTION
+    # ROLE SELECTION (NO PASSWORDS)
     # ---------------------------
     role = st.selectbox("Choose role:", [
         "Front Desk (create jobs)",
@@ -370,42 +370,43 @@ def admin_page():
     if role.startswith("Front Desk"):
         st.subheader("➕ Front Desk — Create Job")
 
-        client = st.text_input("Client Name", key="fd_client")
-        file_name = st.text_input("File Name", key="fd_file")
-        client_email = st.text_input("Client Email", key="fd_email")
+        client = st.text_input("Client Name")
+        file_name = st.text_input("File Name")
+        client_email = st.text_input("Client Email")
 
         if st.button("Create Job"):
             if not client or not file_name:
                 st.error("Missing required fields.")
-            else:
-                job_no = len(df) + 1
-                job_id = f"MCADD_{str(job_no).zfill(3)}"
-                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return
 
-                try:
-                    local_path, public_url = generate_qr_and_upload(job_id)
-                    qr_formula = f'=IMAGE("{public_url}")'
+            job_no = len(df) + 1
+            job_id = f"MCADD_{str(job_no).zfill(3)}"
+            created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    ws.append_row([job_id, client, file_name, client_email,
-                                   "Pending", created_at, ""])
+            try:
+                local_path, public_url = generate_qr_and_upload(job_id)
+                qr_formula = f'=IMAGE("{public_url}")'
 
-                    last_row = len(ws.get_all_values())
-                    ws.update(f"G{last_row}:G{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
-                    resize_row_height(ws, last_row)
+                ws.append_row([job_id, client, file_name, client_email,
+                               "Pending", created_at, ""])
 
-                    st.image(public_url, caption="Generated QR Code", width=300)
+                last_row = len(ws.get_all_values())
+                ws.update(f"G{last_row}:G{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
+                resize_row_height(ws, last_row)
 
-                    if client_email:
-                        ok, err = send_qr_email_smtp(client_email, client, job_id, public_url, local_path)
-                        if ok:
-                            st.success(f"Job {job_id} created and emailed to {client_email}")
-                        else:
-                            st.warning(f"Email failed: {err}")
+                st.image(public_url, caption="Generated QR Code", width=300)
+
+                if client_email:
+                    ok, err = send_qr_email_smtp(client_email, client, job_id, public_url, local_path)
+                    if ok:
+                        st.success(f"Job {job_id} created and emailed to {client_email}")
                     else:
-                        st.success(f"Job {job_id} created.")
+                        st.warning(f"Email failed: {err}")
+                else:
+                    st.success(f"Job {job_id} created.")
 
-                except Exception as e:
-                    st.error("Error creating job: " + str(e))
+            except Exception as e:
+                st.error("Error creating job: " + str(e))
 
     # ---------------------------
     # CAD OPERATOR — UPDATE STATUS
@@ -418,7 +419,9 @@ def admin_page():
         else:
             job_list = df["job_id"].tolist()
             chosen = st.selectbox("Select job", job_list)
-            new_status = st.selectbox("New Status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
+            new_status = st.selectbox("New Status", [
+                "Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"
+            ])
 
             if st.button("Update Status"):
                 if update_status_in_sheet(chosen, new_status):
