@@ -355,30 +355,44 @@ def admin_page():
         st.stop()
 
     # ---------------------------
-    # ROLE SELECTION (NO PASSWORDS)
-    # ---------------------------
-    role = st.selectbox("Choose role:", [
-        "Front Desk (create jobs)",
-        "CAD Operator (update status)"
-    ])
+# ROLE SELECTION
+# ---------------------------
+role = st.selectbox("Choose role:", [
+    "Front Desk (create jobs)",
+    "CAD Operator (update status)"
+])
 
-    df = load_jobs_df()
+# ---------------------------
+# ROLE-SPECIFIC PASSWORD WALL
+# ---------------------------
+if role.startswith("Front Desk"):
+    fd_pass = st.text_input("Enter Front Desk Password:", type="password")
+    if fd_pass != "FD123":
+        st.warning("Front Desk password required.")
+        st.stop()
 
-    # ---------------------------
-    # FRONT DESK — CREATE JOBS
-    # ---------------------------
-    if role.startswith("Front Desk"):
-        st.subheader("➕ Front Desk — Create Job")
+elif role.startswith("CAD Operator"):
+    cad_pass = st.text_input("Enter CAD Operator Password:", type="password")
+    if cad_pass != "CAD123":
+        st.warning("CAD Operator password required.")
+        st.stop()
 
-        client = st.text_input("Client Name")
-        file_name = st.text_input("File Name")
-        client_email = st.text_input("Client Email")
+df = load_jobs_df()
 
-        if st.button("Create Job"):
-            if not client or not file_name:
-                st.error("Missing required fields.")
-                return
+# ---------------------------
+# FRONT DESK — CREATE JOBS
+# ---------------------------
+if role.startswith("Front Desk"):
+    st.subheader("➕ Front Desk — Create Job")
 
+    client = st.text_input("Client Name", key="fd_client")
+    file_name = st.text_input("File Name", key="fd_file")
+    client_email = st.text_input("Client Email", key="fd_email")
+
+    if st.button("Create Job"):
+        if not client or not file_name:
+            st.error("Missing required fields.")
+        else:
             job_no = len(df) + 1
             job_id = f"MCADD_{str(job_no).zfill(3)}"
             created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -408,26 +422,25 @@ def admin_page():
             except Exception as e:
                 st.error("Error creating job: " + str(e))
 
-    # ---------------------------
-    # CAD OPERATOR — UPDATE STATUS
-    # ---------------------------
+
+# ---------------------------
+# CAD OPERATOR — UPDATE STATUS
+# ---------------------------
+elif role.startswith("CAD Operator"):
+    st.subheader("🔧 CAD Operator — Update Status")
+
+    if df.empty:
+        st.info("No jobs available.")
     else:
-        st.subheader("🔧 CAD Operator — Update Status")
+        job_list = df["job_id"].tolist()
+        chosen = st.selectbox("Select job", job_list)
+        new_status = st.selectbox("New Status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
 
-        if df.empty:
-            st.info("No jobs available.")
-        else:
-            job_list = df["job_id"].tolist()
-            chosen = st.selectbox("Select job", job_list)
-            new_status = st.selectbox("New Status", [
-                "Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"
-            ])
-
-            if st.button("Update Status"):
-                if update_status_in_sheet(chosen, new_status):
-                    st.success("Status updated.")
-                else:
-                    st.error("Failed to update status.")
+        if st.button("Update Status"):
+            if update_status_in_sheet(chosen, new_status):
+                st.success("Status updated.")
+            else:
+                st.error("Failed to update status.")
 
     # ---------------------------
     # JOBS TABLE (visible to both roles)
