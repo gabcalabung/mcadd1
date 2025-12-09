@@ -273,34 +273,47 @@ Thank you.
 def viewer_page():
     st.title("📄 Print Job Status Viewer")
 
-    qparams = st.experimental_get_query_params()
-    job_param = qparams.get("job_id", [None])[0]
+    email_input = st.text_input("Enter your email to view all your job orders:")
 
-    job_id_input = st.text_input("Enter Job ID:", value=job_param or "")
-    if not job_id_input:
-        st.info("Scan QR or enter Job ID.")
+    if not email_input:
+        st.info("Enter the same email you used when submitting your print job.")
         return
 
     df = load_jobs_df()
+
     if df.empty:
-        st.warning("No jobs yet.")
+        st.warning("No jobs found.")
         return
 
-    if job_id_input not in df["job_id"].astype(str).values:
-        st.error("Job ID not found.")
+    # Filter jobs by email (case insensitive)
+    user_jobs = df[df["client_email"].str.lower() == email_input.lower()]
+
+    if user_jobs.empty:
+        st.error("No job orders found for this email.")
         return
 
-    row = df[df["job_id"].astype(str) == job_id_input].iloc[0]
+    st.success(f"Found {len(user_jobs)} job order(s) for: **{email_input}**")
 
-    st.success(f"Job Found: {job_id_input}")
-    st.write(f"**Client:** {row['client_name']}")
-    st.write(f"**File:** {row['file_name']}")
-    st.write(f"**Email:** {row['client_email']}")
-    st.write(f"**Created:** {row['created_at']}")
+    # -------- SHOW TABLE OF ALL JOB ORDERS --------
+    st.subheader("📋 Your Job Orders")
+    st.dataframe(user_jobs)
 
-    # Status circles
-    STATUS_STEPS = ["Pending","Checking Document","Printing","Ready for Pickup","Completed"]
-    current_status = row["status"]
+    # -------- STATUS VIEWER FOR SELECTED JOB --------
+    job_id = st.selectbox(
+        "Select a job to view its status:",
+        user_jobs["job_id"].tolist()
+    )
+
+    selected = user_jobs[user_jobs["job_id"] == job_id].iloc[0]
+
+    st.write(f"### 🧾 Job ID: {selected['job_id']}")
+    st.write(f"**Client:** {selected['client_name']}")
+    st.write(f"**File:** {selected['file_name']}")
+    st.write(f"**Created:** {selected['created_at']}")
+
+    # Status progress circles
+    STATUS_STEPS = ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
+    current_status = selected["status"]
 
     try:
         current_index = STATUS_STEPS.index(current_status)
@@ -312,11 +325,11 @@ def viewer_page():
     for i, step in enumerate(STATUS_STEPS):
         with cols[i]:
             if i < current_index:
-                color = "#0A3B99"
+                color = "#0A3B99"  # done
             elif i == current_index:
-                color = "#FFD800"
+                color = "#FFD800"  # current
             else:
-                color = "#D3D3D3"
+                color = "#D3D3D3"  # future
 
             st.markdown(
                 f"""
