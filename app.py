@@ -288,7 +288,8 @@ def viewer_page():
 
     qparams = st.experimental_get_query_params()
     job_param = qparams.get("job_id", [None])[0]
-    job_id_input = st.text_input("Enter Job ID (or scan QR to open link):", value=job_param or "")
+
+    job_id_input = st.text_input("Enter Job ID:", value=job_param or "")
     if not job_id_input:
         st.info("Scan QR or enter Job ID.")
         return
@@ -303,16 +304,73 @@ def viewer_page():
         return
 
     row = df[df["job_id"].astype(str) == str(job_id_input)].iloc[0]
+
     st.success(f"Job Found: {job_id_input}")
+
     st.write(f"**Client:** {row.get('client_name','')}")
     st.write(f"**File:** {row.get('file_name','')}")
     st.write(f"**Client Email:** {row.get('client_email','')}")
     st.write(f"**Created At:** {row.get('created_at','')}")
-    st.subheader("Status")
-    st.write(row.get("status",""))
 
-    st.subheader("QR")
-    qr_cell = row.get("qr_path","")
+    # -----------------------------------------------------
+    # STATUS PROGRESS UI (colored circles)
+    # -----------------------------------------------------
+    STATUS_STEPS = [
+        "Pending",
+        "Checking Document",
+        "Printing",
+        "Ready for Pickup",
+        "Completed",
+    ]
+
+    current_status = row.get("status", "Pending")
+
+    try:
+        current_index = STATUS_STEPS.index(current_status)
+    except:
+        current_index = 0
+
+    st.subheader("📌 Status Progress")
+
+    cols = st.columns(len(STATUS_STEPS))
+    for i, step in enumerate(STATUS_STEPS):
+        with cols[i]:
+
+            if i < current_index:
+                color = "#0A3B99"     # completed (blue)
+            elif i == current_index:
+                color = "#FFD800"     # current (yellow)
+            else:
+                color = "#D3D3D3"     # future (gray)
+
+            highlight = "font-weight:bold;" if i == current_index else ""
+
+            st.markdown(
+                f"""
+                <div style="text-align:center;">
+                    <div style="
+                        width:40px;
+                        height:40px;
+                        border-radius:50%;
+                        background:{color};
+                        border:2px solid #052a66;
+                        margin:auto;">
+                    </div>
+                    <div style="font-size:12px;margin-top:6px;{highlight}">
+                        {step}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    # -----------------------------------------------------
+    # QR DISPLAY
+    # -----------------------------------------------------
+    st.subheader("QR Code")
+
+    qr_cell = row.get("qr_path", "")
+
     if isinstance(qr_cell, str) and qr_cell.startswith("=IMAGE("):
         try:
             url = qr_cell.split('"')[1]
