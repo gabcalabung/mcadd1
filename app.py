@@ -383,74 +383,106 @@ def viewer_page():
         st.info("No QR available.")
 
 def admin_page():
-    st.title("🛠 Admin Panel — Roles: Front Desk / CAD Operator")
-    role = st.selectbox("Choose role:", ["Front Desk (create jobs)", "CAD Operator (update status)"])
-    st.write("Both roles can view the job list below.")
+    st.title("🛠 Admin Panel — Restricted Access")
+
+    # ---------------------------
+    # PASSWORD WALL
+    # ---------------------------
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        password = st.text_input("Enter admin password:", type="password")
+        if st.button("Login"):
+            if password == ADMIN_PASSWORD:
+                st.session_state.logged_in = True
+                st.success("Login successful!")
+            else:
+                st.error("Incorrect password.")
+        st.stop()  # Stop here until password is correct
+
+    # ---------------------------
+    # ROLE SELECTION AFTER LOGIN
+    # ---------------------------
+    role = st.selectbox("Choose role:", [
+        "Front Desk (create jobs)",
+        "CAD Operator (update status)"
+    ])
 
     df = load_jobs_df()
 
-    # FRONT DESK: create jobs
+    # ---------------------------
+    # FRONT DESK — CREATE JOBS
+    # ---------------------------
     if role.startswith("Front Desk"):
         st.subheader("➕ Front Desk — Create Job")
+
         client = st.text_input("Client Name", key="fd_client")
         file_name = st.text_input("File / Document Name", key="fd_file")
         client_email = st.text_input("Client Email", key="fd_email")
-        create_btn = st.button("Create Job", key="fd_create")
 
-        if create_btn:
+        if st.button("Create Job"):
             if not client or not file_name:
                 st.error("Please provide client name and file name.")
             else:
                 job_no = len(df) + 1
                 job_id = f"MCADD_{str(job_no).zfill(3)}"
                 created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 try:
                     local_path, public_url = generate_qr_and_upload(job_id)
                     qr_formula = f'=IMAGE("{public_url}")'
 
-                    # append in the order expected by header:
-                    # job_id, client_name, file_name, client_email, status, created_at, qr_path
-                    ws.append_row([job_id, client, file_name, client_email or "", "Pending", created_at, ""])
+                    ws.append_row([job_id, client, file_name, client_email or "",
+                                   "Pending", created_at, ""])
+
                     last_row = len(ws.get_all_values())
-                    ws.update(f"G{last_row}:G{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
+                    ws.update(f"G{last_row}:G{last_row}", [[qr_formula]],
+                              value_input_option="USER_ENTERED")
                     resize_row_height(ws, last_row, height=220)
 
-                    # send email if SMTP configured and client_email provided
                     if client_email:
-                        ok, err = send_qr_email_smtp(client_email, client, job_id, public_url, local_path)
+                        ok, err = send_qr_email_smtp(
+                            client_email, client, job_id, public_url, local_path
+                        )
                         if ok:
-                            st.success(f"Job {job_id} created and emailed to {client_email}.")
+                            st.success(f"Job {job_id} created and emailed to {client_email}")
                         else:
-                            st.warning(f"Job {job_id} created but email failed: {err}")
+                            st.warning(f"Created but email failed: {err}")
                     else:
-                        st.success(f"Job {job_id} created (no client email provided).")
-
+                        st.success(f"Job {job_id} created.")
                 except Exception as e:
-                    st.error("Failed to create job: " + str(e))
+                    st.error("Error creating job: " + str(e))
 
-    # CAD OPERATORS: update status
+    # ---------------------------
+    # CAD OPERATORS — UPDATE STATUS
+    # ---------------------------
     else:
-        st.subheader("🔧 CAD Operator — Update Status")
+        st.subheader("🔧 CAD Operator — Update Job Status")
+
         if df.empty:
-            st.info("No jobs to update.")
+            st.info("No jobs available.")
         else:
             job_list = df["job_id"].astype(str).tolist()
-            chosen = st.selectbox("Select job", job_list, key="cad_select")
-            new_status = st.selectbox("New status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"], key="cad_status")
-            if st.button("Update Status", key="cad_update"):
+            chosen = st.selectbox("Select job to update", job_list)
+
+            new_status = st.selectbox(
+                "New Status",
+                ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"]
+            )
+
+            if st.button("Update Status"):
                 ok = update_status_in_sheet(chosen, new_status)
                 if ok:
                     st.success("Status updated.")
                 else:
-                    st.error("Failed to update status in sheet.")
+                    st.error("Failed to update status.")
 
-    # Both roles can view the job list
-    st.subheader("📋 All Jobs (live from sheet)")
-    try:
-        st.dataframe(load_jobs_df())
-    except Exception as e:
-        st.error("Failed to load jobs:")
-        st.exception(e)
+    # ---------------------------
+    # JOB LIST — BOTH ROLES SEE THIS
+    # ---------------------------
+    st.subheader("📋 All Jobs")
+    st.dataframe(load_jobs_df())
 
 # ---------------------------
 # Navigation
