@@ -332,17 +332,7 @@ def viewer_page():
                 unsafe_allow_html=True
             )
 
-    # QR Display
-    st.subheader("QR Code")
-    qr_cell = row["qr_path"]
-
-    if qr_cell.startswith("=IMAGE("):
-        url = qr_cell.split('"')[1]
-        st.image(url)
-    elif qr_cell.startswith("http"):
-        st.image(qr_cell)
-    else:
-        st.info("No QR available.")
+    
 
 def admin_page():
     st.title("🛠 Admin Panel — Restricted Access")
