@@ -18,7 +18,7 @@ st.set_page_config(page_title="Print Tracker", layout="wide")
 # ---------------------------
 # Configuration - change only logo filename if necessary
 # ---------------------------
-LOGO_FILENAME = "logo.png"   # place your logo file next to app.py (optional)
+LOGO_FILENAME = "logo.png"   # place your logo file next to app.py
 QR_DIR = "qrcodes"
 os.makedirs(QR_DIR, exist_ok=True)
 
@@ -37,7 +37,7 @@ PUBLIC_URL = get_secret("PUBLIC_URL")
 SHEET_ID = get_secret("SHEET_ID")
 IMGBB_API_KEY = get_secret("IMGBB_API_KEY")
 
-# SMTP email secrets (optional)
+# SMTP email secrets
 EMAIL_HOST = get_secret("EMAIL_HOST")
 EMAIL_PORT = get_secret("EMAIL_PORT")
 EMAIL_USER = get_secret("EMAIL_USER")
@@ -92,11 +92,9 @@ try:
     except Exception:
         ws = sh.add_worksheet(title="Jobs", rows="2000", cols="10")
 
-    # expected header (this app assumes this exact order)
     expected_header = ["job_id", "client_name", "file_name", "client_email", "status", "created_at", "qr_path"]
     current_header = ws.row_values(1)
     if not current_header or current_header[:7] != expected_header:
-        # Be careful: this will reset the sheet header (it overwrites header only)
         ws.clear()
         ws.append_row(expected_header)
 except Exception as e:
@@ -108,7 +106,6 @@ except Exception as e:
 # Utilities
 # ---------------------------
 def upload_to_imgbb(image_path):
-    """Uploads local image to ImgBB; returns direct image URL"""
     if not IMGBB_API_KEY:
         raise RuntimeError("IMGBB_API_KEY missing from secrets.")
     url = "https://api.imgbb.com/1/upload"
@@ -126,8 +123,8 @@ def upload_to_imgbb(image_path):
 def generate_colored_qr_image(link, save_path,
                               module_px=12,
                               outer_border_px=18,
-                              dot_color=(0, 59, 142),    # DARK BLUE (#003B8E)
-                              bg_color=(255, 235, 59)):  # YELLOW (#FFEB3B)
+                              dot_color=(0, 59, 142),
+                              bg_color=(255, 235, 59)):
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
@@ -141,7 +138,6 @@ def generate_colored_qr_image(link, save_path,
 
     inner_px = size * module_px
     canvas_px = inner_px + 2 * outer_border_px
-
     canvas = Image.new("RGB", (canvas_px, canvas_px), dot_color)
     qr_bg = Image.new("RGB", (inner_px, inner_px), bg_color)
     draw = ImageDraw.Draw(qr_bg)
@@ -165,8 +161,7 @@ def generate_colored_qr_image(link, save_path,
                 bbox = module_bbox(x, y)
                 draw.rounded_rectangle(bbox, radius=radius, fill=dot_color)
 
-    paste_pos = (outer_border_px, outer_border_px)
-    canvas.paste(qr_bg, paste_pos)
+    canvas.paste(qr_bg, (outer_border_px, outer_border_px))
 
     if os.path.exists(LOGO_FILENAME):
         try:
@@ -188,11 +183,10 @@ def generate_colored_qr_image(link, save_path,
 
             cx = canvas_px // 2
             cy = canvas_px // 2
-            top_left = (cx - logo_bg_size[0] // 2, cy - logo_bg_size[1] // 2)
             canvas = canvas.convert("RGBA")
-            canvas.paste(logo_bg, top_left, logo_bg)
+            canvas.paste(logo_bg, (cx - logo_bg_size[0]//2, cy - logo_bg_size[1]//2), logo_bg)
             canvas = canvas.convert("RGB")
-        except Exception:
+        except:
             pass
 
     canvas.save(save_path, format="PNG", optimize=True)
@@ -208,11 +202,7 @@ def load_jobs_df():
     records = ws.get_all_records()
     return pd.DataFrame(records)
 
-def append_job_to_sheet(row_values):
-    ws.append_row(row_values)
-
 def update_status_in_sheet(job_id, new_status):
-    # update 'status' column (5th column)
     records = ws.get_all_records()
     for i, r in enumerate(records, start=2):
         if str(r.get("job_id")) == str(job_id):
@@ -243,9 +233,8 @@ def resize_row_height(ws_obj, row_number, height=220):
 # Email sender (SMTP)
 # ---------------------------
 def send_qr_email_smtp(to_email, client_name, job_id, qr_url, local_qr_path):
-    """Send email with attached QR PNG via SMTP. Uses EMAIL_* secrets."""
     if not (EMAIL_HOST and EMAIL_PORT and EMAIL_USER and EMAIL_PASS):
-        st.warning("Email not sent: SMTP credentials are missing from secrets.")
+        st.warning("Email not sent: SMTP secrets are missing.")
         return False, "Missing SMTP secrets."
 
     try:
@@ -256,27 +245,25 @@ def send_qr_email_smtp(to_email, client_name, job_id, qr_url, local_qr_path):
 
         body = f"""Hello {client_name},
 
-Your print job {job_id} is created. Scan the attached QR code or use the link below to track status.
+Your print job {job_id} is now created.
 
+Track your job:
 {PUBLIC_URL}?job_id={job_id}
 
-Thanks,
-Microcadd
+Thank you.
 """
         msg.set_content(body)
 
-        # attach PNG
         with open(local_qr_path, "rb") as f:
-            img_data = f.read()
-        msg.add_attachment(img_data, maintype="image", subtype="png", filename=f"{job_id}.png")
+            msg.add_attachment(f.read(), maintype="image", subtype="png", filename=f"{job_id}.png")
 
-        # send
         server = smtplib.SMTP(EMAIL_HOST, int(EMAIL_PORT))
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.send_message(msg)
         server.quit()
         return True, None
+
     except Exception as e:
         return False, str(e)
 
@@ -289,7 +276,7 @@ def viewer_page():
     qparams = st.experimental_get_query_params()
     job_param = qparams.get("job_id", [None])[0]
 
-    job_id_input = st.text_input("Enter Job ID (or scan QR to open link):", value=job_param or "")
+    job_id_input = st.text_input("Enter Job ID:", value=job_param or "")
     if not job_id_input:
         st.info("Scan QR or enter Job ID.")
         return
@@ -303,27 +290,17 @@ def viewer_page():
         st.error("Job ID not found.")
         return
 
-    row = df[df["job_id"].astype(str) == str(job_id_input)].iloc[0]
+    row = df[df["job_id"].astype(str) == job_id_input].iloc[0]
 
     st.success(f"Job Found: {job_id_input}")
+    st.write(f"**Client:** {row['client_name']}")
+    st.write(f"**File:** {row['file_name']}")
+    st.write(f"**Email:** {row['client_email']}")
+    st.write(f"**Created:** {row['created_at']}")
 
-    st.write(f"**Client:** {row.get('client_name','')}")
-    st.write(f"**File:** {row.get('file_name','')}")
-    st.write(f"**Client Email:** {row.get('client_email','')}")
-    st.write(f"**Created At:** {row.get('created_at','')}")
-
-    # -----------------------------------------------------
-    # STATUS PROGRESS UI (colored circles)
-    # -----------------------------------------------------
-    STATUS_STEPS = [
-        "Pending",
-        "Checking Document",
-        "Printing",
-        "Ready for Pickup",
-        "Completed",
-    ]
-
-    current_status = row.get("status", "Pending")
+    # Status circles
+    STATUS_STEPS = ["Pending","Checking Document","Printing","Ready for Pickup","Completed"]
+    current_status = row["status"]
 
     try:
         current_index = STATUS_STEPS.index(current_status)
@@ -331,32 +308,23 @@ def viewer_page():
         current_index = 0
 
     st.subheader("📌 Status Progress")
-
     cols = st.columns(len(STATUS_STEPS))
     for i, step in enumerate(STATUS_STEPS):
         with cols[i]:
-
             if i < current_index:
-                color = "#0A3B99"     # completed (blue)
+                color = "#0A3B99"
             elif i == current_index:
-                color = "#FFD800"     # current (yellow)
+                color = "#FFD800"
             else:
-                color = "#D3D3D3"     # future (gray)
-
-            highlight = "font-weight:bold;" if i == current_index else ""
+                color = "#D3D3D3"
 
             st.markdown(
                 f"""
                 <div style="text-align:center;">
                     <div style="
-                        width:40px;
-                        height:40px;
-                        border-radius:50%;
-                        background:{color};
-                        border:2px solid #052a66;
-                        margin:auto;">
-                    </div>
-                    <div style="font-size:12px;margin-top:6px;{highlight}">
+                        width:40px;height:40px;border-radius:50%;
+                        background:{color};border:2px solid #052a66;margin:auto;"></div>
+                    <div style="font-size:12px;margin-top:6px;">
                         {step}
                     </div>
                 </div>
@@ -364,20 +332,14 @@ def viewer_page():
                 unsafe_allow_html=True
             )
 
-    # -----------------------------------------------------
-    # QR DISPLAY
-    # -----------------------------------------------------
+    # QR Display
     st.subheader("QR Code")
+    qr_cell = row["qr_path"]
 
-    qr_cell = row.get("qr_path", "")
-
-    if isinstance(qr_cell, str) and qr_cell.startswith("=IMAGE("):
-        try:
-            url = qr_cell.split('"')[1]
-            st.image(url)
-        except:
-            st.write(qr_cell)
-    elif isinstance(qr_cell, str) and qr_cell.startswith("http"):
+    if qr_cell.startswith("=IMAGE("):
+        url = qr_cell.split('"')[1]
+        st.image(url)
+    elif qr_cell.startswith("http"):
         st.image(qr_cell)
     else:
         st.info("No QR available.")
@@ -386,34 +348,30 @@ def admin_page():
     st.title("🛠 Admin Panel — Restricted Access")
 
     # ---------------------------
-    # PASSWORD WALL (non-blocking)
+    # LOGIN WALL
     # ---------------------------
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        st.subheader("Admin login")
-        pw = st.text_input("Enter admin password:", type="password", key="admin_pw")
-        if st.button("Login", key="admin_login"):
-            if pw == ADMIN_PASSWORD:
+        password = st.text_input("Enter admin password:", type="password")
+        if st.button("Login"):
+            if password == ADMIN_PASSWORD:
                 st.session_state.logged_in = True
-                st.success("Login successful.")
-                # force update UI so role selection appears
-                st.experimental_rerun()
+                st.success("Login successful!")
+                st.rerun()   # 🔥 FIXED: this replaced st.experimental_rerun()
             else:
                 st.error("Incorrect password.")
-        # stop rendering the rest of admin page until logged in
-        return
+        st.stop()
 
     # ---------------------------
-    # ROLE SELECTION AFTER LOGIN
+    # ROLE SELECTION
     # ---------------------------
     role = st.selectbox("Choose role:", [
         "Front Desk (create jobs)",
         "CAD Operator (update status)"
     ])
 
-    # reload df after login / each render
     df = load_jobs_df()
 
     # ---------------------------
@@ -423,91 +381,71 @@ def admin_page():
         st.subheader("➕ Front Desk — Create Job")
 
         client = st.text_input("Client Name", key="fd_client")
-        file_name = st.text_input("File / Document Name", key="fd_file")
+        file_name = st.text_input("File Name", key="fd_file")
         client_email = st.text_input("Client Email", key="fd_email")
 
-        if st.button("Create Job", key="fd_create"):
+        if st.button("Create Job"):
             if not client or not file_name:
-                st.error("Please provide client name and file name.")
+                st.error("Missing required fields.")
             else:
                 job_no = len(df) + 1
                 job_id = f"MCADD_{str(job_no).zfill(3)}"
                 created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 try:
-                    # generate QR + upload
                     local_path, public_url = generate_qr_and_upload(job_id)
                     qr_formula = f'=IMAGE("{public_url}")'
 
-                    # append row (leave qr_path blank for now)
-                    ws.append_row([job_id, client, file_name, client_email or "", "Pending", created_at, ""])
+                    ws.append_row([job_id, client, file_name, client_email,
+                                   "Pending", created_at, ""])
+
                     last_row = len(ws.get_all_values())
-
-                    # write image formula as a USER_ENTERED formula so Sheets renders it as image
                     ws.update(f"G{last_row}:G{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
-                    resize_row_height(ws, last_row, height=220)
+                    resize_row_height(ws, last_row)
 
-                    # refresh local df so UI below shows latest
-                    df = load_jobs_df()
-
-                    # show QR in admin immediately
-                    st.success(f"Job {job_id} created.")
-                    st.image(public_url, caption="QR (uploaded)")
-
-                    # send email if SMTP configured and client_email provided
                     if client_email:
                         ok, err = send_qr_email_smtp(client_email, client, job_id, public_url, local_path)
                         if ok:
-                            st.success(f"Job {job_id} emailed to {client_email}")
+                            st.success(f"Job {job_id} created and emailed to {client_email}")
                         else:
-                            st.warning(f"Job created but email failed: {err}")
+                            st.warning(f"Email failed: {err}")
+                    else:
+                        st.success(f"Job {job_id} created.")
 
                 except Exception as e:
                     st.error("Error creating job: " + str(e))
 
     # ---------------------------
-    # CAD OPERATORS — UPDATE STATUS
+    # CAD OPERATOR — UPDATE STATUS
     # ---------------------------
     else:
-        st.subheader("🔧 CAD Operator — Update Job Status")
+        st.subheader("🔧 CAD Operator — Update Status")
 
-        df = load_jobs_df()
         if df.empty:
             st.info("No jobs available.")
         else:
-            job_list = df["job_id"].astype(str).tolist()
-            chosen = st.selectbox("Select job to update", job_list, key="cad_select")
+            job_list = df["job_id"].tolist()
+            chosen = st.selectbox("Select job", job_list)
+            new_status = st.selectbox("New Status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
 
-            new_status = st.selectbox(
-                "New Status",
-                ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"],
-                key="cad_status"
-            )
-
-            if st.button("Update Status", key="cad_update"):
-                ok = update_status_in_sheet(chosen, new_status)
-                if ok:
+            if st.button("Update Status"):
+                if update_status_in_sheet(chosen, new_status):
                     st.success("Status updated.")
-                    # refresh UI so admin sees new status and viewer will too
-                    st.experimental_rerun()
                 else:
                     st.error("Failed to update status.")
 
     # ---------------------------
-    # JOB LIST — BOTH ROLES SEE THIS
+    # JOBS TABLE (visible to both roles)
     # ---------------------------
     st.subheader("📋 All Jobs")
-    try:
-        st.dataframe(load_jobs_df())
-    except Exception as e:
-        st.error("Failed to load jobs:")
-        st.exception(e)
+    st.dataframe(load_jobs_df())
 
 # ---------------------------
 # Navigation
 # ---------------------------
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Viewer", "Admin"])
+
 if page == "Viewer":
     viewer_page()
 else:
