@@ -384,25 +384,6 @@ def viewer_page():
                 unsafe_allow_html=True
             )
 
-    # show QR (we expect qr_path to be =IMAGE("...") or a http url)
-    st.subheader("QR Code (Client)")
-    qr_cell = selected.get("qr_path", "") or ""
-    if isinstance(qr_cell, str) and qr_cell.startswith('=IMAGE("'):
-        try:
-            url = qr_cell.split('"')[1]
-            st.image(url)
-        except Exception:
-            st.write(qr_cell)
-    elif isinstance(qr_cell, str) and qr_cell.startswith("http"):
-        st.image(qr_cell)
-    else:
-        # If selected row didn't contain a qr_path (possible if older rows), try to find other row for same email
-        public_url = find_existing_qr_for_email(email_input)
-        if public_url:
-            st.image(public_url)
-        else:
-            st.info("No QR available for this email yet.")
-
 def admin_page():
     st.title("🛠 Admin Panel — Restricted Access")
 
