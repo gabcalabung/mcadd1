@@ -1,10 +1,5 @@
 # app.py -- Print Tracker (ONE QR per client email)
-# - Scanning QR opens PUBLIC_URL?email=<client_email>
-# - When creating a job: re-use existing uploaded QR for that email if present
-# - Viewer shows all jobs for an email (stacked)
-# - Admin UI protected by ADMIN_PASSWORD (single password), roles selectable after login
-# - Sends email with QR attachment if SMTP secrets present
-# - Color QR generator with rounded modules, center logo, and large row in Sheets
+# - CODE DEC9/2025 
 
 import streamlit as st
 import qrcode
@@ -394,10 +389,10 @@ def admin_page():
     if not st.session_state.logged_in:
         password = st.text_input("Enter admin password:", type="password")
         if st.button("Login"):
-            if password == ADMIN_PASSWORD:
-                st.session_state.logged_in = True
-                st.success("Login successful!")
-                st.experimental_rerun()
+    if password == ADMIN_PASSWORD:
+        st.session_state.logged_in = True
+        st.success("Login successful!")
+        st.rerun()   
             else:
                 st.error("Incorrect password.")
         st.stop()
