@@ -394,18 +394,16 @@ def admin_page():
 
                 try:
                     local_path, public_url = generate_qr_and_upload(job_id)
-qr_formula = f'=IMAGE("{public_url}")'
+                    qr_formula = f'=IMAGE("{public_url}")'
 
-ws.append_row([job_id, client, file_name, client_email or "",
-               "Pending", created_at, ""])
+                    ws.append_row([job_id, client, file_name, client_email,
+                                   "Pending", created_at, ""])
 
-last_row = len(ws.get_all_values())
-ws.update(f"G{last_row}:G{last_row}", [[qr_formula]],
-          value_input_option="USER_ENTERED")
-resize_row_height(ws, last_row, height=220)
+                    last_row = len(ws.get_all_values())
+                    ws.update(f"G{last_row}:G{last_row}", [[qr_formula]], value_input_option="USER_ENTERED")
+                    resize_row_height(ws, last_row)
 
-# 🔥 SHOW THE QR IN ADMIN UI
-st.image(public_url, caption="Generated QR Code", width=300)
+                    st.image(public_url, caption="Generated QR Code", width=300)
 
                     if client_email:
                         ok, err = send_qr_email_smtp(client_email, client, job_id, public_url, local_path)
