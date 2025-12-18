@@ -317,11 +317,14 @@ Microcadd
 def viewer_page():
     st.title("📄 Print Job Status Viewer")
 
-    # Accept email via query param or manual input
-    qparams = st.experimental_get_query_params()
-    param_email = qparams.get("email", [None])[0]
+    # SAFARI-SAFE query param handling
+    param_email = st.query_params.get("email", "")
 
-    email_input = st.text_input("Enter your email to view all your job orders:", value=param_email or "")
+    email_input = st.text_input(
+        "Enter your email to view all your job orders:",
+        value=param_email
+    )
+
     if not email_input:
         st.info("Enter the same email you used when submitting your print job or scan the client QR.")
         return
