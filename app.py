@@ -1,5 +1,5 @@
-# app.py -- Print Tracker with email (SMTP Gmail App Password), roles (Front Desk / CAD),
-# colored rounded QR + center logo, Google Sheets IMAGE(), and big QR rows.
+# app.py -- Print Tracker (ONE QR per client email)
+# - CODE DEC9/2025 
 
 import streamlit as st
 import qrcode
@@ -12,72 +12,76 @@ import gspread
 import json
 import smtplib
 from email.message import EmailMessage
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 
 st.set_page_config(page_title="Print Tracker", layout="wide")
 
-# =========================================================
-# 🎨 GLOBAL THEME (UI ONLY — NO LOGIC CHANGED)
-# =========================================================
+# ======================================================
+# UI DESIGN (ROYAL BLUE + YELLOW) — VISUAL ONLY
+# ======================================================
 st.markdown("""
 <style>
-:root {
-    --royal-blue: #0A3B99;
-    --royal-blue-dark: #052a66;
-    --yellow: #FFD800;
-    --bg: #f4f6fb;
+html, body, [class*="css"] {
+    font-family: 'Segoe UI', sans-serif;
 }
 
 .stApp {
-    background-color: var(--bg);
+    background-color: #F5F7FA;
+}
+
+/* Headings */
+h1, h2, h3 {
+    color: #0A3B99;
+    font-weight: 700;
 }
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
-    background-color: var(--royal-blue);
+    background-color: #0A3B99;
 }
 section[data-testid="stSidebar"] * {
     color: white !important;
 }
 
-/* Headings */
-h1, h2, h3 {
-    color: var(--royal-blue);
+/* Buttons */
+.stButton > button {
+    background-color: #FFD800;
+    color: #052A66;
     font-weight: 700;
+    border-radius: 8px;
+    border: none;
+    padding: 0.6rem 1.2rem;
+}
+.stButton > button:hover {
+    background-color: #E6C200;
+}
+
+/* Inputs */
+.stTextInput input, .stSelectbox select {
+    border-radius: 6px;
+    border: 1px solid #0A3B99;
 }
 
 /* Cards */
 .card {
     background: white;
-    padding: 26px;
-    border-radius: 18px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
-    margin-bottom: 26px;
-}
-
-/* Buttons */
-.stButton > button {
-    background-color: var(--royal-blue);
-    color: white;
-    border-radius: 30px;
-    padding: 10px 26px;
-    font-weight: 600;
-    border: none;
-}
-.stButton > button:hover {
-    background-color: var(--yellow);
-    color: var(--royal-blue-dark);
-}
-
-/* Inputs */
-input {
-    border-radius: 12px !important;
+    padding: 1.5rem;
+    border-radius: 14px;
+    box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
 }
 
 /* Tables */
 [data-testid="stDataFrame"] {
-    border-radius: 14px;
-    overflow: hidden;
+    background: white;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* Alerts */
+.stSuccess {
+    background-color: #FFF6CC;
+    border-left: 6px solid #FFD800;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -143,37 +147,24 @@ sh = gc.open_by_key(SHEET_ID)
 
 try:
     ws = sh.worksheet("Jobs")
-except:
-    ws = sh.add_worksheet(title="Jobs", rows="2000", cols="10")
+except Exception:
+    ws = sh.add_worksheet(title="Jobs", rows="2000", cols="12")
 
 expected_header = ["job_id", "client_name", "file_name", "client_email", "status", "created_at", "qr_path"]
-if not ws.row_values(1) or ws.row_values(1)[:7] != expected_header:
+if ws.row_values(1)[:7] != expected_header:
     ws.clear()
     ws.append_row(expected_header)
 
 # ---------------------------
-# Utilities (UNCHANGED)
+# Utilities
 # ---------------------------
-def upload_to_imgbb(image_path):
-    url = "https://api.imgbb.com/1/upload"
-    with open(image_path, "rb") as f:
-        resp = requests.post(url, data={"key": IMGBB_API_KEY}, files={"image": f})
-    return resp.json()["data"]["url"]
-
-def generate_qr_and_upload(job_id):
-    link = f"{PUBLIC_URL}?job_id={job_id}"
-    local_path = os.path.join(QR_DIR, f"{job_id}.png")
-    qrcode.make(link).save(local_path)
-    public_url = upload_to_imgbb(local_path)
-    return local_path, public_url
-
 def load_jobs_df():
     return pd.DataFrame(ws.get_all_records())
 
 def update_status_in_sheet(job_id, new_status):
     records = ws.get_all_records()
     for i, r in enumerate(records, start=2):
-        if r["job_id"] == job_id:
+        if str(r.get("job_id")) == str(job_id):
             ws.update_cell(i, 5, new_status)
             return True
     return False
@@ -184,22 +175,24 @@ def update_status_in_sheet(job_id, new_status):
 def viewer_page():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.title("📄 Print Job Status Viewer")
-    email_input = st.text_input("Enter your email to view all your job orders:")
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    if not email_input:
+    email = st.text_input("Enter your email to view all your job orders:")
+
+    if not email:
+        st.info("Enter the same email you used when submitting your print job.")
+        st.markdown('</div>', unsafe_allow_html=True)
         return
 
     df = load_jobs_df()
-    user_jobs = df[df["client_email"].str.lower() == email_input.lower()]
+    user_jobs = df[df["client_email"].astype(str).str.lower() == email.lower()]
 
     if user_jobs.empty:
         st.error("No job orders found.")
+        st.markdown('</div>', unsafe_allow_html=True)
         return
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📋 Your Job Orders")
-    st.dataframe(user_jobs)
+    st.success(f"Found {len(user_jobs)} job order(s).")
+    st.dataframe(user_jobs.reset_index(drop=True))
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------------------
@@ -208,66 +201,43 @@ def viewer_page():
 def admin_page():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.title("🛠 Admin Panel — Restricted Access")
-    st.markdown('</div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
         password = st.text_input("Enter admin password:", type="password")
         if st.button("Login"):
             if password == ADMIN_PASSWORD:
                 st.session_state.logged_in = True
+                st.success("Login successful!")
                 st.rerun()
             else:
                 st.error("Incorrect password.")
         st.markdown('</div>', unsafe_allow_html=True)
         return
 
-    role = st.selectbox("Choose role:", [
-        "Front Desk (create jobs)",
-        "CAD Operator (update status)"
-    ])
-
+    role = st.selectbox("Choose role:", ["Front Desk (create jobs)", "CAD Operator (update status)"])
     df = load_jobs_df()
 
-    if role.startswith("Front Desk"):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("➕ Front Desk — Create Job")
-
-        client = st.text_input("Client Name")
-        file_name = st.text_input("File Name")
-        client_email = st.text_input("Client Email")
-
-        if st.button("Create Job"):
-            job_id = f"MCADD_{len(df)+1:03}"
-            local, public = generate_qr_and_upload(job_id)
-            ws.append_row([job_id, client, file_name, client_email,
-                           "Pending", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), public])
-            st.success(f"Job {job_id} created.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    else:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("🔧 CAD Operator — Update Status")
-        chosen = st.selectbox("Select job", df["job_id"].tolist())
-        new_status = st.selectbox("New Status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
+    if role.startswith("CAD"):
+        job = st.selectbox("Select job to update", df["job_id"].tolist())
+        new_status = st.selectbox("New status", ["Pending", "Checking Document", "Printing", "Ready for Pickup", "Completed"])
         if st.button("Update Status"):
-            update_status_in_sheet(chosen, new_status)
-            st.success("Status updated.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            if update_status_in_sheet(job, new_status):
+                st.success("Status updated.")
+            else:
+                st.error("Failed to update status.")
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("📋 All Jobs")
-    st.dataframe(load_jobs_df())
+    st.dataframe(df)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------------------
 # Navigation
 # ---------------------------
-st.sidebar.title("🖨 Microcadd Print Tracker")
-page = st.sidebar.radio("Navigation", ["Viewer", "Admin"])
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to:", ["Viewer", "Admin"])
 
 if page == "Viewer":
     viewer_page()
