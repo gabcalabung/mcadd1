@@ -294,6 +294,9 @@ Your print job {job_id} has been created.
 Track your jobs here:
 {PUBLIC_URL}?email={to_email}
 
+We would appreciate your feedback. Please answer our short survey here:
+https://forms.gle/qfNbSA9pH7NsD4kL8
+
 Thanks,
 Microcadd
 """
