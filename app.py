@@ -195,6 +195,27 @@ def generate_colored_qr_image(link, save_path,
             pass
 
     canvas.save(save_path, format="PNG", optimize=True)
+    
+def log_page_view(email):
+    try:
+        ws_views = sh.worksheet("Views")
+    except Exception:
+        ws_views = sh.add_worksheet(title="Views", rows="2000", cols="10")
+        ws_views.append_row(["email", "timestamp", "ip", "user_agent"])
+
+    try:
+        ip = requests.get("https://api.ipify.org", timeout=10).text
+    except Exception:
+        ip = "unknown"
+
+    user_agent = st.context.headers.get("user-agent", "")
+
+    ws_views.append_row([
+        email,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ip,
+        user_agent
+    ])
 
 # ---------------------------
 # Core functions that implement one-QR-per-email logic
@@ -345,6 +366,7 @@ def viewer_page():
         return
 
     st.success(f"Found {len(user_jobs)} job order(s) for: **{email_input}**")
+log_page_view(email_input)
 
     # show as table
     st.subheader("📋 Your Job Orders")
