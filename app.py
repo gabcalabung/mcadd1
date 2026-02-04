@@ -365,8 +365,8 @@ def viewer_page():
         st.error("No job orders found for this email.")
         return
 
-    st.success(f"Found {len(user_jobs)} job order(s) for: **{email_input}**")
-log_page_view(email_input)
+        st.success(f"Found {len(user_jobs)} job order(s) for: **{email_input}**")
+    log_page_view(email_input)
 
     # show as table
     st.subheader("📋 Your Job Orders")
